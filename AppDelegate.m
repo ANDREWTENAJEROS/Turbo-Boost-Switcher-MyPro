@@ -50,34 +50,12 @@ struct cpusample sample_two;
 // On wake up reinstall the module if needed
 - (void) receiveWakeNote: (NSNotification*) note
 {
-    
-    
-    // Reload the module if the current status is on, since OSX enables turbo boost after an
-    // undetermined time on sleep / hibernation
-    
-    if ([SystemCommands isModuleLoaded]) {
-        
-        if (authorizationRef == NULL) {
-            OSStatus status = AuthorizationCreate(NULL,
-                                                  kAuthorizationEmptyEnvironment,
-                                                  kAuthorizationFlagDefaults,
-                                                  &authorizationRef);
-            
-            AuthorizationItem right = {kAuthorizationRightExecute, 0, NULL, 0};
-            AuthorizationRights rights = {1, &right};
-            AuthorizationFlags flags = kAuthorizationFlagDefaults |
-            kAuthorizationFlagInteractionAllowed |
-            kAuthorizationFlagPreAuthorize |
-            kAuthorizationFlagExtendRights;
-            
-            status = AuthorizationCopyRights(authorizationRef, &rights, NULL, flags, NULL);
-            if (status != errAuthorizationSuccess)
-                NSLog(@"Copy Rights Unsuccessful: %d", status);
-            
+    // Only restore disabled state if Turbo Boost was disabled before sleep and OSX enabled it after wake.
+    // This avoids requesting privileges on every wake when no restore is needed.
+    if (turboBoostWasDisabledBeforeSleep && ![SystemCommands isModuleLoaded]) {
+        if ([self ensureAuthorizationRef]) {
+            [SystemCommands loadModuleWithAuthRef:authorizationRef];
         }
-        
-        [SystemCommands unLoadModuleWithAuthRef:authorizationRef];
-        [SystemCommands loadModuleWithAuthRef:authorizationRef];
     }
     
     [self performSelector:@selector(updateStatus) withObject:nil afterDelay:0.5];
@@ -86,12 +64,51 @@ struct cpusample sample_two;
     [self performSelector:@selector(updateStatus) withObject:nil afterDelay:1.5];
 }
 
+- (void) receiveSleepNote: (NSNotification*) note
+{
+    turboBoostWasDisabledBeforeSleep = [SystemCommands isModuleLoaded];
+}
+
+- (BOOL) ensureAuthorizationRef {
+    if (authorizationRef != NULL) {
+        return YES;
+    }
+    
+    OSStatus status = AuthorizationCreate(NULL,
+                                          kAuthorizationEmptyEnvironment,
+                                          kAuthorizationFlagDefaults,
+                                          &authorizationRef);
+    
+    if (status != errAuthorizationSuccess) {
+        NSLog(@"AuthorizationCreate unsuccessful: %d", status);
+        return NO;
+    }
+    
+    AuthorizationItem right = {kAuthorizationRightExecute, 0, NULL, 0};
+    AuthorizationRights rights = {1, &right};
+    AuthorizationFlags flags = kAuthorizationFlagDefaults |
+    kAuthorizationFlagInteractionAllowed |
+    kAuthorizationFlagPreAuthorize |
+    kAuthorizationFlagExtendRights;
+    
+    status = AuthorizationCopyRights(authorizationRef, &rights, NULL, flags, NULL);
+    if (status != errAuthorizationSuccess) {
+        NSLog(@"Copy Rights Unsuccessful: %d", status);
+        return NO;
+    }
+    
+    return YES;
+}
+
 // Suscribe to wake up notifications
 - (void) fileNotifications
 {
     [[[NSWorkspace sharedWorkspace] notificationCenter] addObserver: self
                                                            selector: @selector(receiveWakeNote:)
                                                                name: NSWorkspaceDidWakeNotification object: NULL];
+    [[[NSWorkspace sharedWorkspace] notificationCenter] addObserver: self
+                                                           selector: @selector(receiveSleepNote:)
+                                                               name: NSWorkspaceWillSleepNotification object: NULL];
 }
 
 - (void) awakeFromNib {
@@ -99,6 +116,7 @@ struct cpusample sample_two;
     // Init the cpu load samples
     sample_one.totalIdleTime = 0;
     sample_two.totalIdleTime = 0;
+    turboBoostWasDisabledBeforeSleep = NO;
     
     // Locale init
     if ([StartupHelper currentLocale] == nil) {
@@ -592,56 +610,18 @@ void sample(bool isOne) {
 
 // Loads the kernel module disabling turbo boost feature
 - (void) disableTurboBoost {
-    
-    if (authorizationRef == NULL) {
-        
-        OSStatus status = AuthorizationCreate(NULL,
-                                              kAuthorizationEmptyEnvironment,
-                                              kAuthorizationFlagDefaults,
-                                              &authorizationRef);
-        
-        AuthorizationItem right = {kAuthorizationRightExecute, 0, NULL, 0};
-        AuthorizationRights rights = {1, &right};
-        AuthorizationFlags flags = kAuthorizationFlagDefaults |
-        kAuthorizationFlagInteractionAllowed |
-        kAuthorizationFlagPreAuthorize |
-        kAuthorizationFlagExtendRights;
-        
-        status = AuthorizationCopyRights(authorizationRef, &rights, NULL, flags, NULL);
-        if (status != errAuthorizationSuccess)
-            NSLog(@"Copy Rights Unsuccessful: %d", status);
-        
+    if ([self ensureAuthorizationRef]) {
+        [SystemCommands loadModuleWithAuthRef:authorizationRef];
+        turboBoostWasDisabledBeforeSleep = YES;
     }
-    
-    [SystemCommands loadModuleWithAuthRef:authorizationRef];
-    
 }
 
 // Unloads the kernel module enabling turbo boost feature
 - (void) enableTurboBoost {
-    
-    if (authorizationRef == NULL) {
-        
-        OSStatus status = AuthorizationCreate(NULL,
-                                              kAuthorizationEmptyEnvironment,
-                                              kAuthorizationFlagDefaults,
-                                              &authorizationRef);
-        
-        AuthorizationItem right = {kAuthorizationRightExecute, 0, NULL, 0};
-        AuthorizationRights rights = {1, &right};
-        AuthorizationFlags flags = kAuthorizationFlagDefaults |
-        kAuthorizationFlagInteractionAllowed |
-        kAuthorizationFlagPreAuthorize |
-        kAuthorizationFlagExtendRights;
-        
-        status = AuthorizationCopyRights(authorizationRef, &rights, NULL, flags, NULL);
-        if (status != errAuthorizationSuccess)
-            NSLog(@"Copy Rights Unsuccessful: %d", status);
-        
+    if ([self ensureAuthorizationRef]) {
+        [SystemCommands unLoadModuleWithAuthRef:authorizationRef];
+        turboBoostWasDisabledBeforeSleep = NO;
     }
-    
-    [SystemCommands unLoadModuleWithAuthRef:authorizationRef];
-    
 }
 
 // Method to check for updates

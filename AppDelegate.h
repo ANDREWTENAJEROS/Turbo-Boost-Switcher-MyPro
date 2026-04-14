@@ -97,6 +97,7 @@
     ChartWindowController *chartWindowController;
     
     BOOL isTurboBoostEnabled;
+    BOOL turboBoostWasDisabledBeforeSleep;
     
     // Sensors Status View
     IBOutlet NSView *sensorsView;
