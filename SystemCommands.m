@@ -286,7 +286,7 @@ int SMCGetFanSpeed(char *key)
     if (resultStatus != errAuthorizationSuccess)
         NSLog(@"Error: %d", resultStatus);
     
-    return YES;
+    return (resultStatus == errAuthorizationSuccess);
 }
 
 
@@ -520,30 +520,34 @@ int SMCGetFanSpeed(char *key)
 
 + (BOOL) loadModuleWithPath:(NSString *) pathToModule andAuthRef:(AuthorizationRef) authRef {
    
-    NSString * processErrorDescription = nil;
-    
     // sudo chown -R root:wheel %pathToModule; sudo kextutil -v %pathToModule
+
+    BOOL chownResult = [self runTaskAsAdmin:@"/usr/sbin/chown" withAuthRef:authRef andArgs:[NSArray arrayWithObjects:@"-R", @"root:wheel",[NSString stringWithFormat:@"%@", pathToModule], nil]];
     
-    [self runTaskAsAdmin:@"/usr/sbin/chown" withAuthRef:authRef andArgs:[NSArray arrayWithObjects:@"-R", @"root:wheel",[NSString stringWithFormat:@"%@", pathToModule], nil]];
-    
-    [self runTaskAsAdmin:@"/usr/bin/kextutil" withAuthRef:authRef andArgs:[NSArray arrayWithObjects:@"-v", [NSString stringWithFormat:@"%@", pathToModule], nil]];
-    
-    if (processErrorDescription != nil) {
-        NSLog(@"Error loading module: %@", processErrorDescription);
+    if (!chownResult) {
+        NSLog(@"Error loading module: chown failed");
+        return NO;
     }
+
+    BOOL loadResult = [self runTaskAsAdmin:@"/usr/bin/kextutil" withAuthRef:authRef andArgs:[NSArray arrayWithObjects:@"-v", [NSString stringWithFormat:@"%@", pathToModule], nil]];
+    
+    if (!loadResult) {
+        NSLog(@"Error loading module: kextutil failed");
+        return NO;
+    }
+    
     return YES;
 
 }
 
 + (BOOL) unloadModuleWithPath:(NSString *) pathToModule andAuthRef:(AuthorizationRef) authRef {
     
-    NSString * processErrorDescription = nil;
-    
     // sudo kextunload -v path
-    [self runTaskAsAdmin:@"/sbin/kextunload" withAuthRef:authRef andArgs:[NSArray arrayWithObjects:@"-v",[NSString stringWithFormat:@"%@", pathToModule], nil]];
+    BOOL unloadResult = [self runTaskAsAdmin:@"/sbin/kextunload" withAuthRef:authRef andArgs:[NSArray arrayWithObjects:@"-v",[NSString stringWithFormat:@"%@", pathToModule], nil]];
     
-    if (processErrorDescription != nil) {
-        NSLog(@"Error unloading module: %@", processErrorDescription);
+    if (!unloadResult) {
+        NSLog(@"Error unloading module: kextunload failed");
+        return NO;
     }
     
     return YES;
